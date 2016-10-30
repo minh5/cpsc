@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 import plotly.plotly as py
@@ -36,6 +37,13 @@ class cleaner(object):
         else:
             return 0
     
+    @staticmethod
+    def recode_race_report(row):
+        if row['race'] == 0:
+            return 'not reported'
+        else:
+            return 'reported'
+    
     @property
     def processed_data(self):
         data = self.data
@@ -44,6 +52,7 @@ class cleaner(object):
         data['new_race'] = data.apply(lambda x: self.recode_race(x), axis=1)
         for stratum in ['C', 'S', 'M', 'L', 'V']:
             data['stratum_' + stratum] = data.apply(lambda x: self.recode_stratum(x, stratum), axis=1)
+        data['race_reported'] = data.apply(lambda x: self.recode_race_report(x), axis=1)
         return data
     
     @property
@@ -116,17 +125,30 @@ class query(object):
         for hospital in self.data.hospital.value_counts().index:
             hosp_dict[hospital] = self.get_top_product(hospital)
         return pd.Series([val for val in hosp_dict.values()]).value_counts() 
+
+    def prepare_race_modeling(self, *args):
+        counts = self.data.ix[self.data['product'] == product, :]
     
-    def prepare_stratum_modeling(self, product):
+    def prepare_stratum_modeling(self, product, dummy_cols=False):
+        if dummy_cols:
+             columns = ['hospital', 'stratum_C', 'stratum_S', 'stratum_M', 'stratum_L', 'stratum_V']
+        else: 
+            columns= ['hospital' ,'stratum']
         counts = self.data.ix[self.data['product'] == product,:]['hospital'].value_counts()
         product_df = pd.DataFrame(counts)
-        columns = ['hospital', 'stratum_C', 'stratum_S', 'stratum_M', 'stratum_L', 'stratum_V']
+        product_df.columns = ['counts']
         df = pd.merge(product_df, self.data.ix[:, columns], left_index=True, right_on=['hospital'], how='left')
-        return df
+        return df.drop_duplicates('hospital')
 
-    def prepare_stratum_modeling2(self, product):
-        counts = self.data.ix[self.data['product'] == product,:]['hospital'].value_counts()
-        product_df = pd.DataFrame(counts)
-
-        df = pd.merge(product_df, self.data.ix[:, ['hospital' ,'stratum']], left_index=True, right_on=['hospital'], how='left')
-        return df
+    def plot_stratum_dist(self, product, stratum):
+        prepared = self.prepare_stratum_modeling(product)
+        data = prepared.ix[prepared['stratum'] == stratum, :]
+        graph = [go.Bar(
+            x=data['hospital'].values.tolist(),
+            y=data['counts'].values.tolist(),
+        )]
+        layout = go.Layout(title='Counts for Stratum ' + stratum)
+        fig = go.Figure(data=graph, layout=layout)
+        print('Variance:', np.var(data.counts.values))
+        print('Mean:', np.mean(data.counts.values))
+        return py.iplot(fig)
